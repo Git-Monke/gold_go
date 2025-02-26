@@ -18,7 +18,7 @@ func initAccount(state *types.State, name string, key *secp256k1.PublicKey, bala
 		Balance: balance,
 		Nonce:   0,
 	}
-	state.KeyNameSet[name] = *key
+	state.KeyNameSet[name] = key
 }
 
 func initState() types.State {
@@ -113,7 +113,7 @@ func TestPerformRename(t *testing.T) {
 		t.Errorf("GitMonke nonce was incorrect, got %d wanted %d", state.AccountSet[pubKeyMonke].Nonce, 1)
 	}
 
-	if state.KeyNameSet["GitMonke"] != pubKeyJeff {
+	if *state.KeyNameSet["GitMonke"] != pubKeyJeff {
 		t.Errorf("Name was not transferred to Jeff's public key")
 	}
 }
@@ -143,7 +143,7 @@ func TestUndoRename(t *testing.T) {
 		t.Errorf("GitMonke nonce was incorrect, got %d wanted %d", state.AccountSet[pubKeyMonke].Nonce, 0)
 	}
 
-	if state.KeyNameSet["GitMonke"] != pubKeyMonke {
+	if *state.KeyNameSet["GitMonke"] != pubKeyMonke {
 		t.Errorf("Name was not moved back to GitMonke's public key")
 	}
 }
@@ -174,9 +174,81 @@ func TestNewName(t *testing.T) {
 		t.Errorf("GitMonke nonce was incorrect, got %d wanted %d", state.AccountSet[pubKeyMonke].Nonce, 1)
 	}
 
-	if state.KeyNameSet["GitMonke"] != pubKeyMonke {
+	if *state.KeyNameSet["GitMonke"] != pubKeyMonke {
 		t.Errorf("Name was transferred improperly")
 	}
+}
+
+func TestNameNotInSet(t *testing.T) {
+	state := initState()
+	addr := b.AddrFromName("GitMonke")
+
+	if b.AddressToPk(&addr, &state.KeyNameSet) != nil {
+		t.Error("This function should return nil without breaking")
+	}
+}
+
+func TestValidateTxn(t *testing.T) {
+	state, txn, _ := createValidTxn()
+	error := txn.Validate(&state)
+
+	if error != nil {
+		t.Error(error.Error())
+	}
+}
+
+func TestInvalidTxns(t *testing.T) {
+	state, txn, sk := createValidTxn()
+	txn.Fee = 100_000_000_001
+	txn.Signature = txn.Sign(&sk)
+	error := txn.Validate(&state)
+
+	if !(error != nil && error.Error() == "txn sends more than senders balance") {
+		t.Errorf("Expected error due to overspending, got %v", error)
+	}
+
+	state, txn, sk = createValidTxn()
+	txn.Sender = b.AddrFromName("Balls")
+	error = txn.Validate(&state)
+
+	if !(error != nil && error.Error() == "sender address does not exist") {
+		t.Errorf("Expected error due to nonexistent address, got %v", error.Error())
+	}
+
+	state, txn, sk = createValidTxn()
+	txn.Fee = 1
+	error = txn.Validate(&state)
+
+	if !(error != nil && error.Error() == "txn sig is incorrect") {
+		t.Errorf("Expected error due to nonexistent address, got %v", error.Error())
+	}
+
+	state, txn, sk = createValidTxn()
+	txn.Nonce = 1
+	txn.Signature = txn.Sign(&sk)
+	error = txn.Validate(&state)
+
+	if !(error != nil && error.Error() == "txn uses the wrong nonce") {
+		t.Errorf("Expected error due to nonexistent address, got %v", error.Error())
+	}
+
+}
+
+func createValidTxn() (types.State, b.Txn, secp256k1.PrivateKey) {
+	state := initState()
+	privKeyMonke, pubKeyMonke := newKeypair()
+	initAccount(&state, "GitMonke", &pubKeyMonke, 200_000_000_000)
+	_, pubKeyJeff := newKeypair()
+
+	txn := b.Txn{
+		Sender:    b.AddrFromName("GitMonke"),
+		Payments:  []b.Payment{{Reciever: b.AddrFromKey(&pubKeyJeff), Amount: 100_000_000_000}},
+		Signature: b.MinimalSignature(),
+	}
+
+	txn.Signature = txn.Sign(&privKeyMonke)
+
+	return state, txn, privKeyMonke
 }
 
 // func TestValidation(t *testing.T) {

@@ -2,7 +2,11 @@ package blockchain
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	t "gold/types"
+
+	"crypto/sha256"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
@@ -12,6 +16,7 @@ import (
 type Txn struct {
 	Sender    t.Address
 	Payments  []Payment
+	Fee       uint64
 	Nonce     uint32
 	Signature *schnorr.Signature
 }
@@ -37,7 +42,9 @@ func (t *Txn) Encode() []byte {
 		data = encodePayment(payment, data)
 	}
 
-	data = binary.LittleEndian.AppendUint32(data, uint32(t.Nonce))
+	data = binary.LittleEndian.AppendUint64(data, t.Fee)
+	data = binary.LittleEndian.AppendUint32(data, t.Nonce)
+
 	data = append(data, t.Signature.Serialize()...)
 
 	return data
@@ -52,20 +59,68 @@ func (txn *Txn) PerformOp(state *t.State) t.UndoOp {
 	for _, payment := range txn.Payments {
 		recieverKey := AddressToPk(&payment.Reciever, &keyNameSet)
 
-		if account, exists := accountSet[recieverKey]; exists {
+		if account, exists := accountSet[*recieverKey]; exists {
 			account.Balance += payment.Amount
 		} else {
-			accountSet[recieverKey] = &t.Account{Balance: payment.Amount, Nonce: 0}
+			accountSet[*recieverKey] = &t.Account{Balance: payment.Amount, Nonce: 0}
 		}
 
-		accountSet[senderKey].Balance -= payment.Amount
-		accountSet[senderKey].Nonce += 1
+		accountSet[*senderKey].Balance -= payment.Amount
+		accountSet[*senderKey].Nonce += 1
 	}
 
 	return &TxnUndo{
 		Sender:   txn.Sender,
 		Payments: txn.Payments,
 	}
+}
+
+func (txn Txn) Validate(state *t.State) error {
+	accountSet := state.AccountSet
+	keyNameSet := state.KeyNameSet
+
+	senderPkPtr := AddressToPk(&txn.Sender, &keyNameSet)
+
+	if senderPkPtr == nil {
+		return errors.New("sender address does not exist")
+	}
+
+	senderPk := *senderPkPtr
+
+	var totalSent uint64 = 0
+	account := accountSet[senderPk]
+
+	for _, payment := range txn.Payments {
+		totalSent += payment.Amount
+	}
+
+	if totalSent+txn.Fee > account.Balance {
+		return errors.New("txn sends more than senders balance")
+	}
+
+	if account.Nonce != txn.Nonce {
+		return errors.New("txn uses the wrong nonce")
+	}
+
+	// This will probably be a bottleneck down the line. Easily optimizable.
+	clone := txn
+	clone.Signature = MinimalSignature()
+	hash := sha256.Sum256(clone.Encode())
+	fmt.Println(hash)
+
+	if !txn.Signature.Verify(hash[:], &senderPk) {
+		return errors.New("txn sig is incorrect")
+	}
+
+	return nil
+}
+
+func (txn Txn) Sign(privKey *secp256k1.PrivateKey) *schnorr.Signature {
+	clone := txn
+	clone.Signature = MinimalSignature()
+	hash := sha256.Sum256(clone.Encode())
+	sig, _ := schnorr.Sign(privKey, hash[:])
+	return sig
 }
 
 func (txn *TxnUndo) PerformUndo(state *t.State) {
@@ -75,7 +130,7 @@ func (txn *TxnUndo) PerformUndo(state *t.State) {
 	senderKey := AddressToPk(&txn.Sender, &keyNameSet)
 
 	for _, payment := range txn.Payments {
-		recieverKey := AddressToPk(&payment.Reciever, &keyNameSet)
+		recieverKey := *AddressToPk(&payment.Reciever, &keyNameSet)
 		account := accountSet[recieverKey]
 
 		if account.Balance == payment.Amount {
@@ -84,17 +139,18 @@ func (txn *TxnUndo) PerformUndo(state *t.State) {
 			accountSet[recieverKey].Balance -= payment.Amount
 		}
 
-		accountSet[senderKey].Balance += payment.Amount
-		accountSet[senderKey].Nonce -= 1
+		accountSet[*senderKey].Balance += payment.Amount
+		accountSet[*senderKey].Nonce -= 1
 	}
 }
 
-func AddressToPk(ad *t.Address, keyNameSet *t.KeyNameSet) secp256k1.PublicKey {
+// If the address uses a name not in the set, it will return a nil pointer
+func AddressToPk(ad *t.Address, keyNameSet *t.KeyNameSet) *secp256k1.PublicKey {
 	if ad.UsesName {
 		return (*keyNameSet)[*ad.Name]
 	}
 
-	return *ad.Key
+	return ad.Key
 }
 
 func encodePayment(payment Payment, data []byte) []byte {
@@ -152,10 +208,11 @@ func (r *Rename) PerformOp(state *t.State) t.UndoOp {
 	accountSet := state.AccountSet
 	keyNameSet := state.KeyNameSet
 
-	key, exists := keyNameSet[r.Name]
+	keyPtr, exists := keyNameSet[r.Name]
 
 	// The fee is always paid by the old owner, if one exists.
 	if exists {
+		key := *keyPtr
 		accountSet[key].Balance -= r.Fee
 		accountSet[key].Nonce += 1
 	} else {
@@ -163,26 +220,37 @@ func (r *Rename) PerformOp(state *t.State) t.UndoOp {
 		accountSet[*r.NewKey].Nonce += 1
 	}
 
-	keyNameSet[r.Name] = *r.NewKey
+	keyNameSet[r.Name] = r.NewKey
 
 	return &RenameUndo{
 		Name:     r.Name,
-		OldOwner: &key,
+		OldOwner: keyPtr,
 		Fee:      r.Fee,
 	}
+}
+
+// Todo
+func (r *Rename) Validate(state *t.State) t.UndoOp {
+	return &RenameUndo{}
+}
+
+// Todo
+func (r *Rename) Sign(state *t.State) schnorr.Signature {
+	return schnorr.Signature{}
 }
 
 func (r *RenameUndo) PerformUndo(state *t.State) {
 	accountSet := state.AccountSet
 	keyNameSet := state.KeyNameSet
 
-	currOwner, _ := keyNameSet[r.Name]
+	currOwnerPtr, _ := keyNameSet[r.Name]
+	currOwner := *currOwnerPtr
 
 	// If there was a previous owner, reimburse them. Otherwise, reimburse the current owner.
 	if r.OldOwner != nil {
 		accountSet[*r.OldOwner].Balance += r.Fee
 		accountSet[*r.OldOwner].Nonce -= 1
-		keyNameSet[r.Name] = *r.OldOwner
+		keyNameSet[r.Name] = r.OldOwner
 	} else {
 		accountSet[currOwner].Balance += r.Fee
 		accountSet[currOwner].Nonce -= 1

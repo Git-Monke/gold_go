@@ -2,6 +2,7 @@ package types
 
 import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
 )
 
 // Blockchain
@@ -21,7 +22,7 @@ type Header struct {
 // State Management
 
 type AccountSet = map[secp256k1.PublicKey]*Account
-type KeyNameSet = map[string]secp256k1.PublicKey
+type KeyNameSet = map[string]*secp256k1.PublicKey
 
 type State struct {
 	AccountSet AccountSet
@@ -33,7 +34,7 @@ type State struct {
 
 type Account struct {
 	Balance uint64
-	Nonce   int
+	Nonce   uint32
 }
 
 // Blockchain Operations
@@ -41,7 +42,8 @@ type Account struct {
 type Op interface {
 	Encode() []byte
 	PerformOp(state *State) UndoOp
-	// Validate(state *State) bool
+	Validate(state *State) error
+	Sign(privkey *secp256k1.PrivateKey) *schnorr.Signature
 }
 
 type UndoOp interface {
