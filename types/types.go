@@ -43,7 +43,8 @@ type Op interface {
 	Encode() []byte
 	PerformOp(state *State) UndoOp
 	Validate(state *State) error
-	Sign(privkey *secp256k1.PrivateKey) *schnorr.Signature
+	Sign(privKey *secp256k1.PrivateKey) *schnorr.Signature
+	CheckSig(sig *schnorr.Signature, pubKey *secp256k1.PublicKey) bool
 }
 
 type UndoOp interface {

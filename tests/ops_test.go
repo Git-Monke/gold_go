@@ -100,7 +100,7 @@ func TestPerformRename(t *testing.T) {
 		NewKey:    &pubKeyJeff,
 		Fee:       100_000_000_000,
 		Nonce:     0,
-		Signature: *b.MinimalSignature(),
+		Signature: b.MinimalSignature(),
 	}
 
 	rename.PerformOp(&state)
@@ -129,7 +129,7 @@ func TestUndoRename(t *testing.T) {
 		NewKey:    &pubKeyJeff,
 		Fee:       100_000_000_000,
 		Nonce:     0,
-		Signature: *b.MinimalSignature(),
+		Signature: b.MinimalSignature(),
 	}
 
 	renameUndo := rename.PerformOp(&state)
@@ -161,7 +161,7 @@ func TestNewName(t *testing.T) {
 		NewKey:    &pubKeyMonke,
 		Fee:       100_000_000_000,
 		Nonce:     0,
-		Signature: *b.MinimalSignature(),
+		Signature: b.MinimalSignature(),
 	}
 
 	rename.PerformOp(&state)
@@ -249,6 +249,90 @@ func createValidTxn() (types.State, b.Txn, secp256k1.PrivateKey) {
 	txn.Signature = txn.Sign(&privKeyMonke)
 
 	return state, txn, privKeyMonke
+}
+
+func createValidRename() (types.State, b.Rename, secp256k1.PrivateKey, secp256k1.PublicKey) {
+	state := initState()
+	privKeyMonke, pubKeyMonke := newKeypair()
+	initAccount(&state, "GitMonke", &pubKeyMonke, 200_000_000_000)
+	_, pubKeyJeff := newKeypair()
+
+	txn := b.Rename{
+		Name:   "GitMonke",
+		NewKey: &pubKeyJeff,
+		Fee:    100_000_000_000,
+		Nonce:  0,
+	}
+
+	txn.Signature = txn.Sign(&privKeyMonke)
+
+	return state, txn, privKeyMonke, pubKeyMonke
+}
+
+func TestValidRename(t *testing.T) {
+	state, rename, monkePrivKey, monkePubKey := createValidRename()
+	error := rename.Validate(&state)
+	if error != nil {
+		t.Errorf("Expected no error, got %v", error)
+	}
+
+	state, rename, monkePrivKey, monkePubKey = createValidRename()
+	delete(state.KeyNameSet, "GitMonke")
+	rename.NewKey = &monkePubKey
+	rename.Signature = rename.Sign(&monkePrivKey)
+	error = rename.Validate(&state)
+	if error != nil {
+		t.Errorf("Expected no error, got %v", error)
+	}
+}
+
+func TestInvalidRenames(t *testing.T) {
+	// Check liable parties exist and have the right amount
+	state, rename, monkePrivKey, monkePubKey := createValidRename()
+	delete(state.KeyNameSet, "GitMonke")
+	rename.Signature = rename.Sign(&monkePrivKey)
+	error := rename.Validate(&state)
+
+	if !(error != nil && error.Error() == "The liable key-holder is not in the account set") {
+		t.Errorf("Expected missing key-holder error, got %v", error)
+	}
+
+	state, rename, monkePrivKey, monkePubKey = createValidRename()
+	delete(state.AccountSet, monkePubKey)
+	rename.Signature = rename.Sign(&monkePrivKey)
+	error = rename.Validate(&state)
+
+	if !(error != nil && error.Error() == "The liable key-holder is not in the account set") {
+		t.Errorf("Expected missing key-holder error, got %v", error)
+	}
+
+	// Check liable parties exist and have the right amount
+	state, rename, monkePrivKey, monkePubKey = createValidRename()
+	state.AccountSet[monkePubKey].Balance = 50_000_000
+	rename.Signature = rename.Sign(&monkePrivKey)
+	error = rename.Validate(&state)
+
+	if !(error != nil && error.Error() == "The liable key-holder cannot pay the fee") {
+		t.Errorf("Expected missing key-holder error, got %v", error)
+	}
+
+	state, rename, monkePrivKey, monkePubKey = createValidRename()
+	delete(state.KeyNameSet, "GitMonke")
+	rename.NewKey = &monkePubKey
+	state.AccountSet[monkePubKey].Balance = 50_000_000
+	rename.Signature = rename.Sign(&monkePrivKey)
+	error = rename.Validate(&state)
+
+	if !(error != nil && error.Error() == "The liable key-holder cannot pay the fee") {
+		t.Errorf("Expected missing key-holder error, got %v", error)
+	}
+
+	state, rename, monkePrivKey, monkePubKey = createValidRename()
+	rename.Fee += 1
+	error = rename.Validate(&state)
+	if !(error != nil && error.Error() == "sig is invalid") {
+		t.Errorf("Expected no error, got %v", error)
+	}
 }
 
 // func TestValidation(t *testing.T) {
