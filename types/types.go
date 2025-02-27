@@ -15,7 +15,7 @@ type Block struct {
 type Header struct {
 	PrevBlockHash [32]byte
 	MerkleRoot    [32]byte
-	Timestamp     uint64
+	Timestamp     uint32
 	Nonce         uint64
 }
 

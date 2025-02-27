@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"gold/blockchain"
 	b "gold/blockchain"
 	"gold/types"
 	"testing"
@@ -335,46 +336,46 @@ func TestInvalidRenames(t *testing.T) {
 	}
 }
 
-// func TestValidation(t *testing.T) {
-// 	state := types.State{
-// 		AccountSet: make(types.AccountSet),
-// 		KeyNameSet: make(types.KeyNameSet),
-// 		BlockSizes: [100]int{},
-// 		Timestamps: [720]uint64{},
-// 		Height:     0,
-// 	}
+func TestValidation(t *testing.T) {
+	state := types.State{
+		AccountSet: make(types.AccountSet),
+		KeyNameSet: make(types.KeyNameSet),
+		BlockSizes: [100]int{},
+		Timestamps: [720]uint64{},
+		Height:     0,
+	}
 
-// 	privKeyMonke, pubKeyMonke := newKeypair()
-// 	_, pubKeyJeff := newKeypair()
+	privKeyMonke, pubKeyMonke := newKeypair()
+	_, pubKeyJeff := newKeypair()
 
-// 	initAccount(&state, "GitMonke", &pubKeyMonke, 200_000_000_000)
-// 	initAccount(&state, "Jeff", &pubKeyJeff, 0)
+	initAccount(&state, "GitMonke", &pubKeyMonke, 200_000_000_000)
+	initAccount(&state, "Jeff", &pubKeyJeff, 0)
 
-// 	monkeAddr := b.AddrFromName("GitMonke")
-// 	jeffAddr := b.AddrFromName("Jeff")
+	monkeAddr := b.AddrFromName("GitMonke")
+	jeffAddr := b.AddrFromName("Jeff")
 
-// 	// Once these operations are performed, GitMonke should have 200_000_000_000 (from the coinbase), Jeff should have 200_000_000_000, and Jeff should own the "GitMonke" name
-// 	ops := []types.Op{
-// 		b.TemplateCoinbase(&monkeAddr),
-// 		b.SwitchName("GitMonke", &privKeyMonke, &pubKeyJeff),
-// 		b.NewTxn(&monkeAddr, privKeyMonke, &jeffAddr, 200_000_000_000),
-// 	}
+	// Once these operations are performed, GitMonke should have 200_000_000_000 (from the coinbase), Jeff should have 200_000_000_000, and Jeff should own the "GitMonke" name
+	ops := []types.Op{
+		b.TemplateCoinbase(&monkeAddr),
+		b.NewRename("GitMonke", &privKeyMonke, &pubKeyJeff),
+		b.NewTxn(&monkeAddr, privKeyMonke, &jeffAddr, 200_000_000_000),
+	}
 
-// 	header := types.Header{
-// 		PrevBlockHash: b.HashBlockHeader(blockchain.GenesisHeader()),
-// 		MerkleRoot:    b.CalculateMerkleRoot(ops),
-// 		Timestamp:     1,
-// 		Nonce:         0,
-// 	}
+	header := types.Header{
+		PrevBlockHash: b.HashBlockHeader(blockchain.GenesisHeader()),
+		MerkleRoot:    b.CalculateMerkleRoot(ops),
+		Timestamp:     1,
+		Nonce:         0,
+	}
 
-// 	block := types.Block{
-// 		Header:     header,
-// 		Operations: ops,
-// 	}
+	block := types.Block{
+		Header:     header,
+		Operations: ops,
+	}
 
-// 	block.Operations[0] = b.Coinbase(&monkeAddr, &block)
+	block.Operations[0] = b.Coinbase(&monkeAddr, &block)
 
-// 	if b.ValidateBlock(&block, &state) != true {
-// 		t.Error("Block did not validate properly")
-// 	}
-// }
+	if b.ValidateBlock(&block, &state) != true {
+		t.Error("Block did not validate properly")
+	}
+}
